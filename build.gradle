@@ -1,0 +1,72 @@
+task('configure') << {
+  def console = System.console()
+  if (console) {
+    def installDir = "${System.getProperty('user.home')}/.cpr/"
+    def reqDir = console.readLine("\n> Working directory location ($installDir):")
+    if (reqDir.trim()) {
+      installDir = reqDir
+    }
+    new File(installDir).mkdirs()
+    def sdkDir = ""
+    while (!new File(sdkDir).exists()) {
+      sdkDir = console.readLine('> Android SDK location: ')
+    }
+    def ndkDir = ""
+    while (!new File(ndkDir).exists()) {
+      ndkDir = ndkDir = console.readLine('> NDK location: ')
+    }
+    def props = new Properties()
+    props.setProperty('install.dir', installDir)
+    props.setProperty('sdk.dir', sdkDir)
+    props.setProperty('ndk.dir', ndkDir)
+
+    def localFile = new File("$rootDir/.config")
+    def destFile = new File("$installDir/local.properties")
+    props.store(localFile.newWriter(), null)
+    props.store(destFile.newWriter(), null)
+  } else {
+    logger.error "Cannot get console -- if you are using the gradle daemon, please try again with --no-daemon"
+  }
+}
+
+def Properties getConfig() {
+  def conf = new File("$rootDir/.config")
+  if (!conf.exists()) {
+    throw new GradleException("Please run configure before running any other tasks.")
+  }
+  Properties props = new Properties()
+  props.load(conf.newDataInputStream())
+  return props
+}
+
+def String findLatestVersion(File dir) {
+  int latestApi = 0
+  dir.eachFile() { file ->
+    def name = file.getName()
+    if (name.startsWith('android')) {}
+      int apiLevel = name.substring('android-'.length()).toInteger()
+      if (apiLevel > latestApi) {
+        latestApi = apiLevel
+      }
+  }
+  return "android-$latestApi"
+}
+
+task('buildNdk') << {
+  def conf = getConfig()
+  def toolScript = new File(conf.getProperty('ndk.dir'), 'build/tools/make-standalone-toolchain.sh')
+  if (!toolScript.exists()) {
+    throw new GradleException("Cannot find '$toolScript', is your NDK path (${conf.getProperty('ndk.path')}) correct?")
+  }
+  def tsPath = toolScript.getAbsolutePath()
+  def latestApi = findLatestVersion(new File(conf.getProperty('ndk.dir'), "platforms"))
+  ['arm-linux-androideabi-4.9', 'x86-4.9', 'x86_64-4.9'].each { toolchain ->
+    def installDir = new File(conf.getProperty('install.dir'),
+                              "ndk-standalone/$latestApi/$toolchain/")
+    installDir.mkdirs()
+    exec {
+      executable tsPath
+      args "--toolchain=${toolchain}", "--platform=$latestApi", "--install-dir=${installDir.getAbsolutePath()}", '--system=darwin-x86_64'
+    }
+  }
+}
